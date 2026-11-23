@@ -1,6 +1,3 @@
--- SimpleGuiLibrary.lua
--- Refactored from BBN Tracker V25 into a simple, reusable Roblox GUI library
-
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 
@@ -25,7 +22,7 @@ local function makeDraggable(dragHandle, targetFrame)
 	local startPos = nil
 
 	dragHandle.InputBegan:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseButton1 then
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
 			dragging = true
 			dragStart = input.Position
 			startPos = targetFrame.Position
@@ -33,7 +30,7 @@ local function makeDraggable(dragHandle, targetFrame)
 	end)
 
 	UserInputService.InputChanged:Connect(function(input)
-		if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+		if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
 			local delta = input.Position - dragStart
 			targetFrame.Position = UDim2.new(
 				startPos.X.Scale,
@@ -45,10 +42,198 @@ local function makeDraggable(dragHandle, targetFrame)
 	end)
 
 	UserInputService.InputEnded:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseButton1 then
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
 			dragging = false
 		end
 	end)
+end
+
+local function attachControls(target, container, anchorFrame)
+	target.SubMenus = {}
+
+	local function hideSubMenus()
+		for _, sub in ipairs(target.SubMenus) do
+			sub:SetVisible(false)
+		end
+	end
+
+	function target:AddLabel(text)
+		local label = Instance.new("TextLabel")
+		label.Size = UDim2.new(0.9, 0, 0, 22)
+		label.Text = text or ""
+		label.TextColor3 = DEFAULT_THEME.Text
+		label.BackgroundTransparency = 1
+		label.Font = Enum.Font.Gotham
+		label.TextSize = 13
+		label.Parent = container
+		return label
+	end
+
+	function target:AddButton(text, colorOrCallback, maybeCallback)
+		local color = DEFAULT_THEME.Button
+		local callback = maybeCallback
+		if typeof(colorOrCallback) == "function" then
+			callback = colorOrCallback
+		elseif typeof(colorOrCallback) == "Color3" then
+			color = colorOrCallback
+		end
+
+		local btn = Instance.new("TextButton")
+		btn.Size = UDim2.new(0.9, 0, 0, 26)
+		btn.Text = text or "Button"
+		btn.BackgroundColor3 = color
+		btn.BorderSizePixel = 0
+		btn.TextColor3 = DEFAULT_THEME.Text
+		btn.Font = Enum.Font.GothamBold
+		btn.TextSize = 12
+		btn.Parent = container
+
+		if callback then
+			btn.MouseButton1Click:Connect(callback)
+		end
+
+		return btn
+	end
+
+	function target:AddToggle(text, defaultState, callback)
+		local state = defaultState == true
+
+		local btn = Instance.new("TextButton")
+		btn.Size = UDim2.new(0.9, 0, 0, 28)
+		btn.BorderSizePixel = 0
+		btn.TextColor3 = DEFAULT_THEME.Text
+		btn.Font = Enum.Font.GothamBold
+		btn.TextSize = 12
+		btn.Parent = container
+
+		local function refresh()
+			btn.Text = string.format("%s: %s", text or "Toggle", state and "ON" or "OFF")
+			btn.BackgroundColor3 = state and DEFAULT_THEME.ToggleOn or DEFAULT_THEME.ToggleOff
+		end
+
+		refresh()
+
+		btn.MouseButton1Click:Connect(function()
+			state = not state
+			refresh()
+			if callback then
+				callback(state)
+			end
+		end)
+
+		return {
+			Button = btn,
+			GetState = function()
+				return state
+			end,
+			SetState = function(_, newState)
+				state = newState == true
+				refresh()
+				if callback then
+					callback(state)
+				end
+			end,
+		}
+	end
+
+	function target:AddTextBox(placeholder, buttonText, callback)
+		local holder = Instance.new("Frame")
+		holder.Size = UDim2.new(0.9, 0, 0, 56)
+		holder.BackgroundTransparency = 1
+		holder.Parent = container
+
+		local box = Instance.new("TextBox")
+		box.Size = UDim2.new(1, 0, 0, 25)
+		box.Position = UDim2.new(0, 0, 0, 0)
+		box.BackgroundColor3 = DEFAULT_THEME.Input
+		box.BorderSizePixel = 0
+		box.TextColor3 = DEFAULT_THEME.Text
+		box.PlaceholderText = placeholder or "Enter text..."
+		box.Text = ""
+		box.Font = Enum.Font.Gotham
+		box.TextSize = 12
+		box.Parent = holder
+
+		local submitBtn = Instance.new("TextButton")
+		submitBtn.Size = UDim2.new(1, 0, 0, 25)
+		submitBtn.Position = UDim2.new(0, 0, 0, 30)
+		submitBtn.Text = buttonText or "SUBMIT"
+		submitBtn.BackgroundColor3 = DEFAULT_THEME.ToggleOn
+		submitBtn.BorderSizePixel = 0
+		submitBtn.TextColor3 = DEFAULT_THEME.Text
+		submitBtn.Font = Enum.Font.GothamBold
+		submitBtn.TextSize = 12
+		submitBtn.Parent = holder
+
+		submitBtn.MouseButton1Click:Connect(function()
+			if callback then
+				callback(box.Text)
+			end
+		end)
+
+		return {
+			TextBox = box,
+			Button = submitBtn,
+			GetText = function()
+				return box.Text
+			end,
+		}
+	end
+
+	function target:AddSubMenu(label, color)
+		local subFrame = Instance.new("Frame")
+		subFrame.Size = UDim2.new(0, 180, 0, 300)
+		subFrame.Position = UDim2.new(1, 10, 0, 0)
+		subFrame.BackgroundColor3 = DEFAULT_THEME.SubMenu
+		subFrame.BorderSizePixel = 0
+		subFrame.Visible = false
+		subFrame.Parent = anchorFrame
+
+		local scroll = Instance.new("ScrollingFrame")
+		scroll.Size = UDim2.new(1, 0, 1, -10)
+		scroll.Position = UDim2.new(0, 0, 0, 5)
+		scroll.BackgroundTransparency = 1
+		scroll.BorderSizePixel = 0
+		scroll.ScrollBarThickness = 2
+		scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+		scroll.Parent = subFrame
+
+		local layout = Instance.new("UIListLayout")
+		layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+		layout.Padding = UDim.new(0, 4)
+		layout.Parent = scroll
+
+		layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+			scroll.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 8)
+		end)
+
+		local SubMenu = {
+			Frame = subFrame,
+			Scroll = scroll,
+		}
+
+		attachControls(SubMenu, scroll, subFrame)
+
+		function SubMenu:SetVisible(visible)
+			subFrame.Visible = visible
+			if not visible then
+				for _, child in ipairs(SubMenu.SubMenus) do
+					child:SetVisible(false)
+				end
+			end
+		end
+
+		local toggleBtn = target:AddButton((label or "MENU") .. " >", color or DEFAULT_THEME.Button, function()
+			local nextState = not subFrame.Visible
+			hideSubMenus()
+			SubMenu:SetVisible(nextState)
+		end)
+
+		SubMenu.Button = toggleBtn
+		table.insert(target.SubMenus, SubMenu)
+
+		return SubMenu
+	end
 end
 
 function Library:CreateWindow(options)
@@ -129,206 +314,21 @@ function Library:CreateWindow(options)
 		ScreenGui = screenGui,
 		MainFrame = mainFrame,
 		Content = content,
-		SubMenus = {},
 	}
+
+	attachControls(Window, content, mainFrame)
 
 	function Window:SetVisible(visible)
 		mainFrame.Visible = visible
+		if not visible then
+			for _, sub in ipairs(Window.SubMenus) do
+				sub:SetVisible(false)
+			end
+		end
 	end
 
 	function Window:Destroy()
 		screenGui:Destroy()
-	end
-
-	function Window:AddLabel(text)
-		local label = Instance.new("TextLabel")
-		label.Size = UDim2.new(0.9, 0, 0, 22)
-		label.Text = text or ""
-		label.TextColor3 = DEFAULT_THEME.Text
-		label.BackgroundTransparency = 1
-		label.Font = Enum.Font.Gotham
-		label.TextSize = 13
-		label.Parent = content
-		return label
-	end
-
-	function Window:AddButton(text, colorOrCallback, maybeCallback)
-		local color = DEFAULT_THEME.Button
-		local callback = maybeCallback
-		if typeof(colorOrCallback) == "function" then
-			callback = colorOrCallback
-		elseif typeof(colorOrCallback) == "Color3" then
-			color = colorOrCallback
-		end
-
-		local btn = Instance.new("TextButton")
-		btn.Size = UDim2.new(0.9, 0, 0, 26)
-		btn.Text = text or "Button"
-		btn.BackgroundColor3 = color
-		btn.BorderSizePixel = 0
-		btn.TextColor3 = DEFAULT_THEME.Text
-		btn.Font = Enum.Font.GothamBold
-		btn.TextSize = 12
-		btn.Parent = content
-
-		if callback then
-			btn.MouseButton1Click:Connect(callback)
-		end
-
-		return btn
-	end
-
-	function Window:AddToggle(text, defaultState, callback)
-		local state = defaultState == true
-
-		local btn = Instance.new("TextButton")
-		btn.Size = UDim2.new(0.9, 0, 0, 28)
-		btn.BorderSizePixel = 0
-		btn.TextColor3 = DEFAULT_THEME.Text
-		btn.Font = Enum.Font.GothamBold
-		btn.TextSize = 12
-		btn.Parent = content
-
-		local function refresh()
-			btn.Text = string.format("%s: %s", text or "Toggle", state and "ON" or "OFF")
-			btn.BackgroundColor3 = state and DEFAULT_THEME.ToggleOn or DEFAULT_THEME.ToggleOff
-		end
-
-		refresh()
-
-		btn.MouseButton1Click:Connect(function()
-			state = not state
-			refresh()
-			if callback then
-				callback(state)
-			end
-		end)
-
-		return {
-			Button = btn,
-			GetState = function()
-				return state
-			end,
-			SetState = function(_, newState)
-				state = newState == true
-				refresh()
-				if callback then
-					callback(state)
-				end
-			end,
-		}
-	end
-
-	function Window:AddTextBox(placeholder, buttonText, callback)
-		local holder = Instance.new("Frame")
-		holder.Size = UDim2.new(0.9, 0, 0, 56)
-		holder.BackgroundTransparency = 1
-		holder.Parent = content
-
-		local box = Instance.new("TextBox")
-		box.Size = UDim2.new(1, 0, 0, 25)
-		box.Position = UDim2.new(0, 0, 0, 0)
-		box.BackgroundColor3 = DEFAULT_THEME.Input
-		box.BorderSizePixel = 0
-		box.TextColor3 = DEFAULT_THEME.Text
-		box.PlaceholderText = placeholder or "Enter text..."
-		box.Text = ""
-		box.Font = Enum.Font.Gotham
-		box.TextSize = 12
-		box.Parent = holder
-
-		local submitBtn = Instance.new("TextButton")
-		submitBtn.Size = UDim2.new(1, 0, 0, 25)
-		submitBtn.Position = UDim2.new(0, 0, 0, 30)
-		submitBtn.Text = buttonText or "SUBMIT"
-		submitBtn.BackgroundColor3 = DEFAULT_THEME.ToggleOn
-		submitBtn.BorderSizePixel = 0
-		submitBtn.TextColor3 = DEFAULT_THEME.Text
-		submitBtn.Font = Enum.Font.GothamBold
-		submitBtn.TextSize = 12
-		submitBtn.Parent = holder
-
-		submitBtn.MouseButton1Click:Connect(function()
-			if callback then
-				callback(box.Text)
-			end
-		end)
-
-		return {
-			TextBox = box,
-			Button = submitBtn,
-			GetText = function()
-				return box.Text
-			end,
-		}
-	end
-
-	function Window:AddSubMenu(label, color)
-		local subFrame = Instance.new("Frame")
-		subFrame.Size = UDim2.new(0, 180, 0, 300)
-		subFrame.Position = UDim2.new(1, 10, 0, 0)
-		subFrame.BackgroundColor3 = DEFAULT_THEME.SubMenu
-		subFrame.BorderSizePixel = 0
-		subFrame.Visible = false
-		subFrame.Parent = mainFrame
-
-		local scroll = Instance.new("ScrollingFrame")
-		scroll.Size = UDim2.new(1, 0, 1, -10)
-		scroll.Position = UDim2.new(0, 0, 0, 5)
-		scroll.BackgroundTransparency = 1
-		scroll.BorderSizePixel = 0
-		scroll.ScrollBarThickness = 2
-		scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
-		scroll.Parent = subFrame
-
-		local layout = Instance.new("UIListLayout")
-		layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-		layout.Padding = UDim.new(0, 3)
-		layout.Parent = scroll
-
-		layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-			scroll.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 6)
-		end)
-
-		table.insert(Window.SubMenus, subFrame)
-
-		local toggleBtn = Window:AddButton((label or "MENU") .. " >", color or DEFAULT_THEME.Button, function()
-			local nextState = not subFrame.Visible
-			for _, other in ipairs(Window.SubMenus) do
-				other.Visible = false
-			end
-			subFrame.Visible = nextState
-		end)
-
-		local SubMenu = {
-			Frame = subFrame,
-			Scroll = scroll,
-			Button = toggleBtn,
-		}
-
-		function SubMenu:AddButton(btnText, callback)
-			local b = Instance.new("TextButton")
-			b.Size = UDim2.new(0.9, 0, 0, 25)
-			b.Text = btnText or "Item"
-			b.BackgroundColor3 = DEFAULT_THEME.Button
-			b.BorderSizePixel = 0
-			b.TextColor3 = DEFAULT_THEME.Text
-			b.Font = Enum.Font.Gotham
-			b.TextSize = 12
-			b.Parent = scroll
-
-			if callback then
-				b.MouseButton1Click:Connect(callback)
-			end
-
-			return b
-		end
-
-		function SubMenu:SetVisible(visible)
-			subFrame.Visible = visible
-		end
-
-		return SubMenu
 	end
 
 	return Window
