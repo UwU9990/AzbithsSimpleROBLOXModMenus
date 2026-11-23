@@ -16,20 +16,20 @@ local DEFAULT_THEME = {
 	Text = Color3.new(1, 1, 1),
 }
 
-local function makeDraggable(dragHandle, targetFrame)
+local function makeDraggable(dragHandle, targetFrame, trackConnection)
 	local dragging = false
 	local dragStart = nil
 	local startPos = nil
 
-	dragHandle.InputBegan:Connect(function(input)
+	trackConnection(dragHandle.InputBegan:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
 			dragging = true
 			dragStart = input.Position
 			startPos = targetFrame.Position
 		end
-	end)
+	end))
 
-	UserInputService.InputChanged:Connect(function(input)
+	trackConnection(UserInputService.InputChanged:Connect(function(input)
 		if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
 			local delta = input.Position - dragStart
 			targetFrame.Position = UDim2.new(
@@ -39,16 +39,16 @@ local function makeDraggable(dragHandle, targetFrame)
 				startPos.Y.Offset + delta.Y
 			)
 		end
-	end)
+	end))
 
-	UserInputService.InputEnded:Connect(function(input)
+	trackConnection(UserInputService.InputEnded:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
 			dragging = false
 		end
-	end)
+	end))
 end
 
-local function attachControls(target, container, anchorFrame)
+local function attachControls(target, container, anchorFrame, rootWindow)
 	target.SubMenus = {}
 
 	local function hideSubMenus()
@@ -117,23 +117,28 @@ local function attachControls(target, container, anchorFrame)
 			state = not state
 			refresh()
 			if callback then
-				callback(state)
+				task.spawn(callback, state)
 			end
 		end)
 
-		return {
+		local toggleObj = {
 			Button = btn,
 			GetState = function()
 				return state
 			end,
 			SetState = function(_, newState)
-				state = newState == true
+				local nextState = newState == true
+				if state == nextState then return end
+				state = nextState
 				refresh()
 				if callback then
 					callback(state)
 				end
 			end,
 		}
+
+		table.insert(rootWindow._toggles, toggleObj)
+		return toggleObj
 	end
 
 	function target:AddTextBox(placeholder, buttonText, callback)
@@ -212,7 +217,7 @@ local function attachControls(target, container, anchorFrame)
 			Scroll = scroll,
 		}
 
-		attachControls(SubMenu, scroll, subFrame)
+		attachControls(SubMenu, scroll, subFrame, rootWindow)
 
 		function SubMenu:SetVisible(visible)
 			subFrame.Visible = visible
@@ -236,8 +241,13 @@ local function attachControls(target, container, anchorFrame)
 	end
 end
 
-function Library:CreateWindow(options)
+function Library:CreateWindow(options, buildFn)
+	if type(options) == "function" then
+		buildFn = options
+		options = {}
+	end
 	options = options or {}
+
 	local titleText = options.Title or "SIMPLE GUI"
 	local width = options.Width or 200
 	local height = options.Height or 340
@@ -304,19 +314,38 @@ function Library:CreateWindow(options)
 		content.CanvasSize = UDim2.new(0, 0, 0, mainLayout.AbsoluteContentSize.Y + 8)
 	end)
 
-	makeDraggable(topBar, mainFrame)
-
-	closeBtn.MouseButton1Click:Connect(function()
-		screenGui:Destroy()
-	end)
-
 	local Window = {
+		Running = true,
 		ScreenGui = screenGui,
 		MainFrame = mainFrame,
 		Content = content,
+		_connections = {},
+		_toggles = {},
+		_onCloseCallbacks = {},
 	}
 
-	attachControls(Window, content, mainFrame)
+	function Window:AddConnection(conn)
+		if conn then
+			table.insert(Window._connections, conn)
+		end
+		return conn
+	end
+
+	function Window:Connect(signal, fn)
+		return Window:AddConnection(signal:Connect(fn))
+	end
+
+	function Window:OnClose(fn)
+		if type(fn) == "function" then
+			table.insert(Window._onCloseCallbacks, fn)
+		end
+	end
+
+	makeDraggable(topBar, mainFrame, function(conn)
+		Window:AddConnection(conn)
+	end)
+
+	attachControls(Window, content, mainFrame, Window)
 
 	function Window:SetVisible(visible)
 		mainFrame.Visible = visible
@@ -328,7 +357,37 @@ function Library:CreateWindow(options)
 	end
 
 	function Window:Destroy()
+		if not Window.Running then return end
+		Window.Running = false
+
+		for _, toggle in ipairs(Window._toggles) do
+			if toggle.GetState() then
+				toggle:SetState(false)
+			end
+		end
+
+		for _, conn in ipairs(Window._connections) do
+			if conn and conn.Connected then
+				conn:Disconnect()
+			end
+		end
+		Window._connections = {}
+		Window._toggles = {}
+
+		for _, fn in ipairs(Window._onCloseCallbacks) do
+			pcall(fn)
+		end
+		Window._onCloseCallbacks = {}
+
 		screenGui:Destroy()
+	end
+
+	closeBtn.MouseButton1Click:Connect(function()
+		Window:Destroy()
+	end)
+
+	if type(buildFn) == "function" then
+		task.spawn(buildFn, Window)
 	end
 
 	return Window
@@ -337,27 +396,33 @@ end
 --[[
 Example Usage:
 
-local window = Library:CreateWindow({
+local RunService = game:GetService("RunService")
+
+Library:CreateWindow({
 	Title = "BBN TRACKER V25",
 	Width = 200,
 	Height = 340,
-})
+}, function(window)
+	local active = false
 
-window:AddToggle("PERM MODE", false, function(enabled)
-	print("Perm mode:", enabled)
-end)
+	window:AddToggle("MY TOGGLE", false, function(enabled)
+		active = enabled
+		print("Toggled:", enabled)
+	end)
 
-window:AddButton("KILLERS", Color3.fromRGB(80, 20, 20), function()
-	print("Scanning killers...")
-end)
+	-- Automatically disconnected when X is clicked
+	window:Connect(RunService.Heartbeat, function()
+		if not active then return end
+		-- per-frame logic
+	end)
 
-local emotes = window:AddSubMenu("EMOTES", Color3.fromRGB(0, 80, 80))
-emotes:AddButton("DANCE 1", function()
-	print("Playing dance 1")
-end)
-
-window:AddTextBox("Emote ID...", "PLAY", function(id)
-	print("Playing ID:", id)
+	-- Automatically stops when X is clicked
+	while window.Running do
+		if active then
+			-- periodic logic
+		end
+		task.wait(0.1)
+	end
 end)
 --]]
 
